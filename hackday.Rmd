@@ -192,14 +192,154 @@ small_data <-
                      "'vacant'",
                      "eliminated",
                      "'eliminated'",
-                     "new post")))
+                     "new post"))) %>%
+  mutate(quarter = openxlsx::convertToDate(quarter))
 ```
 
 ## Tidy data
 
-We try again, this type with the relevant variables in place. However, we need to order our variables and convert to factors where appropriate. We should also make it tidy data by having one row per unique person, we can do this by combining post. Let's keep things simple by looking our most recent 
+We try again, this type with the relevant variables in place. However, we need to order our variables and convert to factors where appropriate. We should also make it tidy data by having one row per unique person, we can do this by combining post. Let's keep things simple by looking our most recent quarter, then we can use `purrr` later to do it iteratively over each quarter. Let's take the quarter with the most data, `max(table(small_data$quarter))` 
 
-```{r}
+```{r message=FALSE}
+# Correct type of variables
+# ----
+# names(easy_data)
+# inspect data, any need normalising? or logicising or 
+# to_normalise <- names(select(d, -outcome))
+factorise  <- c("quarter", "grade", "organisation", "job",
+                "department", "unit")
+logicise <- c()
+numericise <- c("pay", "fte", "pay_ceiling", "pay_floor")
+
+# correct the type
+
+typed_data <- small_data %>%
+  mutate_each_(funs(as.factor), factorise) %>%
+  mutate_each_(funs(as.numeric), numericise) 
+
+# if we look at the grades, we see inconsitent naming
+# table(typed_data$grade)
+# let's make them the same and order them
+# for pay bands see
+# https://en.wikipedia.org/wiki/Civil_Service_(United_Kingdom)#Codes
+
+# we convert to grade character, to recode the old levels
+# to something consistent
+# ----
+  # define translation
+  scs4 = c("OF-9", "Perm Sec", "SCS4",
+                      "Permanent Secretary", "SCS 4")
+  scs3 = c("Director General", "OF-8",
+                      "SCS 3", "SCS Band 3", "SCS3")
+  scs2 = c("Director", "OF-7",
+                      "SCS 2", "SCS Band 2", "SCS2")
+  scs1 = c("OF-6", "SCS1", "SCS1A")
+  
+
+corrected_grades <- mutate(typed_data,
+                           grade = forcats::fct_recode(grade,
+                             SCS4 = "OF-9",
+                             SCS4 = "Perm Sec",
+                             SCS4 = "SCS4",
+                             SCS4 ="Permanent Secretary",
+                             SCS4 = "SCS 4"
+                           )) %>%
+  mutate(
+                           grade = forcats::fct_recode(grade,
+                             SCS3 = "Director General",
+                             SCS3 = "OF-8", 
+                             SCS3 = "SCS 3", 
+                             SCS3 = "SCS Band 3", 
+                             SCS3 = "SCS3"
+                           ))  %>%
+    mutate(
+                           grade = forcats::fct_recode(grade,
+                             SCS2 = scs2[1],
+                             SCS2 = scs2[2], 
+                             SCS2 = scs2[3], 
+                             SCS2 = scs2[4], 
+                             SCS2 = scs2[5]
+                           ))  %>% 
+      mutate(
+                           grade = forcats::fct_recode(grade,
+                             SCS1 = scs1[1],
+                             SCS1 = scs1[2], 
+                             SCS1 = scs1[3]
+                           )) %>%
+        mutate(
+                           grade = forcats::fct_relevel(grade,
+                             "SCS4",
+                             "SCS3", 
+                             "SCS2"
+                           )) 
+  
+# ----
+
+
+# tidy data, one row per id and name? worry about this later
+
+
+# Make it just one quarter, one snip in time
+easy_data <- corrected_grades %>%
+  filter(quarter == "2014-03-01")
+
+
 
 ```
+
+Let's look at our data. We might want to look at a few Departments of interest as there seems to be variation in their names and difference in employes.
+
+```{r}
+# easy_data <- easy_data %>% 
+#   filter(organisation == "Ministry of Defence" |
+#           organisation == "Ministry of Justice" |
+#            organisation == "Her Majesty's Revenue and Customs" |
+#            organisation == "HM Treasury" |
+#            organisation == "Foreign and Commonwealth office" |
+#            organisation == "DFID" |
+#            organisation == "Department for Transport" |
+#            organisation == "Cabinet Office" |
+#            organisation == "Department for Business Innovation and Skills")
+```
+
+Most of the data is missing for pay for some reason. We take a short cut here by plotting the expect salary as the midpoint between the ceiling and floor.
+
+```{r}
+#drop levels
+easy_data <- easy_data %>%
+  mutate(pay = (pay_ceiling + pay_floor)/2) 
+# %>%
+#   droplevels()
+library(treemap)
+treemap(easy_data,
+       index=c("department", "grade"),
+       vSize="pay",
+       type="value")
+```
+
+
+Let's try making it into a tree.
+
+```{r}
+library(data.tree)
+
+easy_data$pathString <- paste("civil_service",
+                               easy_data$department,
+                               easy_data$unit,
+                              easy_data$grade,
+                              sep = "/")
+tree <- as.Node(easy_data[,])
+print(tree, pruneMethod = "dist", limit = 20)
+```
+
+We can also navigate the tree to find the pay of a specific `department`, `unit` and `grade`.
+
+```{r}
+tree$`Department for Education`$`Education Funding Agency`$SCS1$pay
+tree$`Department for Education`$`Education Funding Agency`$SCS2$pay
+tree$`Department for Education`$`Education Funding Agency`$SCS3$pay
+
+
+```
+
 
