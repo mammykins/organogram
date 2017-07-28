@@ -1,0 +1,205 @@
+---
+title: "organograms_trees"
+author: "Matthew Gregory"
+date: "28 July 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Using data.trees to look at our hierarchial data
+
+Duncan wrote a script to read in the HMRC data as it is the most complete. This included some filtering and cleaning of the data.
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(stringr)
+
+data_file <- "./Departmental_organograms_gov.uk_data.gov_.uk_4_7_2017.xlsx"
+
+sheets <- excel_sheets(data_file)
+org_sheets <- sheets[str_detect(sheets, "^Collated\\.")]
+
+# org_data <-
+#   org_sheets %>%
+#   map_df(~ read_excel(data_file,
+#                       sheet = .x,
+#                       col_types = "text"),
+#          .id = "org") %>%
+#   mutate(org = org_sheets[as.integer(org)])
+
+# org_data_list <- map(org_sheets,
+#                      ~ read_excel(data_file,
+#                                   sheet = .x,
+#                                   col_types = "text"))
+
+# map(org_data_list, colnames) %>%
+#   map(count)
+
+hmrc_sheet_name <- "Collated.HMRC"
+hmrc_data <- read_excel(data_file, hmrc_sheet_name)
+
+# TODO: Clean
+# CBE
+# Double spaces
+# richard summergill | richard summersgill cbe
+
+# sort(table(tolower(hmrc_data$Name)))
+
+small_data <-
+  hmrc_data %>%
+  filter(!(Name %in% c("N/D", "VACANT", "Vacant", "Eliminated"))) %>%
+  filter(!is.na(Name)) %>%
+  select(`Post Unique Reference`,
+         `Name`,
+         `Grade (or equivalent)`,
+         `Reports to Senior Post`,
+         `Organisation`)
+
+map(small_data, ~ length(unique(.x)))
+
+
+write_tsv(small_data, "hmrc.tsv")
+
+# Post Unique Reference
+# Name
+# Grade (or equivalent)
+# Reports to Senior Post
+# Organisation
+```
+
+
+Let's solve for one department as another group are collating the sheets.
+
+### Treating as a tree not a dataframe
+
+People often try to resolve hierarchical problems in a tabular fashion, for instance with data frames. But often, hierarchies don’t marry with tables, and various workarounds are usually required. Let's prepare the data acknowledging the inherent hierarchy.  
+
+We load a suitable package.
+
+```{r}
+library(data.tree)
+```
+
+
+
+## Explore the data
+
+Read in as characters, let's use unique to help see the variety.
+
+Our data appears to be succesfully filtered.  
+
+```{r}
+unique(small_data$Organisation)
+```
+
+Let's get an idea of what the data looks like.
+
+```{r}
+glimpse(small_data)
+```
+
+There's `r unique(small_data$Name)` unique Names among the `r nrows(small_data)`.
+
+## Control for job sharing
+
+Some senior roles share jobs, thus the post unique reference may have two or more names associated with it. This is not tidy data, we should create a unique variable by combining `Post Unique Reference` with `Name`.
+
+## Prepare tree structure
+
+Let’s convert that into a `data.tree` structure! We start by defining a pathString. The pathString describes the hierarchy by defining a path from the root to each leaf. In this example, the hierarchy comes very naturally:
+
+```{r}
+small_data$pathString <- paste(unique(small_data$Organisation), 
+                            small_data$`Reports to Senior Post`, 
+                            sep = "/")
+```
+
+Once our pathString is defined, conversion to Node is very easy:
+
+```{r}
+organo <- as.Node(small_data)
+# names(small_data)
+print(organo, "Name", "Post Unique Reference",
+      "Grade (or equivalent)", limit = 20)
+```
+
+This isn't in the structure we want, we may need to reshape. Let's try and read in the data again making it a bit tidier.  
+
+## Attempt 2 - tidying data
+
+Let's take Duncan's initial script and get the data necessary to answer our question, as our interests have diverged. We are interested in getting the data into suitable format to be compatible with the `data.tree` format and all the opportunity this will provide (https://cran.r-project.org/web/packages/data.tree/vignettes/applications.html). We need hierarchial data.  
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(stringr)
+
+# TODO: Clean
+# CBE
+# Double spaces
+# richard summergill | richard summersgill cbe
+
+data_file <- "./Departmental_organograms_gov.uk_data.gov_.uk_4_7_2017.xlsx"
+
+sheets <- excel_sheets(data_file)
+org_sheets <- sheets[str_detect(sheets, "^Collated\\.")]
+
+org_data <-
+  org_sheets %>%
+  map_df(~ read_excel(data_file,
+                      sheet = .x,
+                      col_types = "text",
+                      na = c("", "N/A"))) %>%
+  # mutate(org = org_sheets[as.integer(org)]) %>%
+  rename(quarter = `Back to Index`,
+         post = `Post Unique Reference`,
+         name = `Name`,
+         grade = `Grade (or equivalent)`,
+         superior = `Reports to Senior Post`,
+         org = `Parent Department`,
+         job = `Job Title`,
+         department = `Parent Department`,
+         organisation = `Organisation`,
+         unit = `Unit`,
+         pay = `Total Pay (£)`,
+         fte = `FTE`,
+         pay_ceiling = `Actual Pay Ceiling (£)`,
+         pay_floor = `Actual Pay Floor (£)`) %>%
+  select(quarter, post, name, grade, superior, organisation,
+         job, department, organisation, unit, pay,
+         fte, pay_ceiling, pay_floor)
+
+# hmrc_sheet_name <- "Collated.HMRC"
+# hmrc_data <- read_excel(data_file, hmrc_sheet_name)
+
+small_data <-
+  org_data %>%
+  mutate(name = tolower(name)) %>%
+  filter(!is.na(post),
+         !is.na(name),
+         !(name %in% c("n/d",
+                     "nd",
+                     "na",
+                     "n/d'",
+                     "eliminated.",
+                     "eliminated'",
+                     "\"eliminated\"",
+                     "vacant",
+                     "'vacant'",
+                     "eliminated",
+                     "'eliminated'",
+                     "new post")))
+```
+
+## Tidy data
+
+We try again, this type with the relevant variables in place. However, we need to order our variables and convert to factors where appropriate. We should also make it tidy data by having one row per unique person, we can do this by combining post. Let's keep things simple by looking our most recent 
+
+```{r}
+
+```
+
