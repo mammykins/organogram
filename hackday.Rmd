@@ -322,9 +322,12 @@ Let's try making it into a tree.
 
 ```{r}
 library(data.tree)
+# missing data causes problems later
+easy_data <- na.omit(easy_data)
 
 easy_data$pathString <- paste("civil_service",
                                easy_data$department,
+                              easy_data$organisation,
                                easy_data$unit,
                               easy_data$grade,
                               sep = "/")
@@ -332,14 +335,71 @@ tree <- as.Node(easy_data[,])
 print(tree, pruneMethod = "dist", limit = 20)
 ```
 
-We can also navigate the tree to find the pay of a specific `department`, `unit` and `grade`.
+We can also navigate the tree to find the pay of a specific `department`, `organisation`, `unit` and `grade`.
 
 ```{r}
-tree$`Department for Education`$`Education Funding Agency`$SCS1$pay
-tree$`Department for Education`$`Education Funding Agency`$SCS2$pay
-tree$`Department for Education`$`Education Funding Agency`$SCS3$pay
-
+tree$`Department for Education`$`Education Funding Agency`$`Education Funding Agency`$SCS2$pay
 
 ```
 
+How is this useful?
+
+
+```{r}
+dfe <- tree$`Department for Education`
+Sort(dfe, "pay", decreasing = TRUE)
+print(dfe, "department", "unit", "grade", "pay", limit = 12)
+```
+
+Or we can find out the department with the largest pay. (ffails)
+
+```{r eval = FALSE}
+maxGNI <- Aggregate(tree, "pay", max)
+#same thing, in a more traditional way:
+maxGNI <- max(sapply(tree$leaves, function(x) x$GNI))
+
+tree$Get("name", filterFun = function(x) x$isLeaf && x$GNI == maxGNI)
+```
+
+## Aggregating, cumulative pay
+
+We aggregate the pay For non-leaves, this will recursively iterate through children, and cache the result in the population field.
+
+```{r}
+tree$Do(function(x) {
+        x$pay <- Aggregate(node = x,
+        attribute = "pay",
+        aggFun = sum)
+        }, 
+     traversal = "post-order")
+```
+
+Next we sort each node by pay.
+
+```{r}
+Sort(tree, attribute = "pay", decreasing = TRUE, recursive = TRUE)
+
+```
+
+Finally, we cumulate among siblings, and store the running sum in an attribute called `cum_pay`:
+
+```{r}
+tree$Do(function(x) x$cum_pay <- Cumulate(x, "pay", sum))
+
+```
+
+The tree now looks like this:
+
+```{r}
+print(tree, "pay", "cum_pay", pruneMethod = "dist", limit = 20)
+
+```
+
+If we drop the `grade` it might be more informative as not all the departments units have each `grade`.
+
+## Round 2, fight
+
+We could also opt to prune for those smaller `units` that make up the `department`s.
+
+The previous steps were done to define our threshold: big units should be displayed, while small ones should be grouped together. This lets us define a pruning function that will allow a maximum of 7 countries per continent, and that will prune all countries making up less than 90% of a continent’s population.
 
