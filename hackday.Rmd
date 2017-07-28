@@ -280,8 +280,9 @@ corrected_grades <- mutate(typed_data,
 
 
 # Make it just one quarter, one snip in time
-easy_data <- corrected_grades %>%
-  filter(quarter == "2014-03-01")
+easy_data <- corrected_grades 
+# %>%
+#   filter(quarter == "2014-03-01")
 
 
 
@@ -320,6 +321,8 @@ treemap(easy_data,
 
 Let's try making it into a tree.
 
+Where we have Department, organisation, unit hierarchy encapsulated.
+
 ```{r}
 library(data.tree)
 # missing data causes problems later
@@ -329,20 +332,37 @@ easy_data$pathString <- paste("civil_service",
                                easy_data$department,
                               easy_data$organisation,
                                easy_data$unit,
-                              easy_data$grade,
+                              # easy_data$grade,
                               sep = "/")
 tree <- as.Node(easy_data[,])
 print(tree, pruneMethod = "dist", limit = 20)
 ```
 
-We can also navigate the tree to find the pay of a specific `department`, `organisation`, `unit` and `grade`.
+We can also navigate the tree to find the pay of a specific `department`, `organisation`, `unit`
 
 ```{r}
-tree$`Department for Education`$`Education Funding Agency`$`Education Funding Agency`$SCS2$pay
+tree$`Department for Education`$`Education Funding Agency`$`Education Funding Agency`$pay
 
 ```
 
 How is this useful?
+
+Well you can work out the branchiness of a Department which might indicate the complexity.
+
+In computing, tree data structures, and game theory, the branching factor is the number of children at each node, the outdegree. If this value is not uniform, an average branching factor can be calculated.
+
+```{r}
+tree$`Cabinet Office`$children
+tree$`Cabinet Office`$averageBranchingFactor
+
+```
+
+Thus we can quantify the complexity, debateably.
+
+```{r}
+tree$`Ministry of Defence`$children
+tree$`Ministry of Defence`$averageBranchingFactor
+```
 
 
 ```{r}
@@ -351,19 +371,21 @@ Sort(dfe, "pay", decreasing = TRUE)
 print(dfe, "department", "unit", "grade", "pay", limit = 12)
 ```
 
-Or we can find out the department with the largest pay. (ffails)
+Or we can find out the department with the largest `pay` for an individual. Which is...
 
-```{r eval = FALSE}
-maxGNI <- Aggregate(tree, "pay", max)
+```{r}
+max_pay <- Aggregate(tree, "pay", max)
+
 #same thing, in a more traditional way:
-maxGNI <- max(sapply(tree$leaves, function(x) x$GNI))
+# although sapply is inconsistent, shouldnt use
+max_pay <- max(sapply(tree$leaves, function(x) x$pay))
 
-tree$Get("name", filterFun = function(x) x$isLeaf && x$GNI == maxGNI)
+tree$Get("name", filterFun = function(x) x$isLeaf && x$pay == max_pay)
 ```
 
 ## Aggregating, cumulative pay
 
-We aggregate the pay For non-leaves, this will recursively iterate through children, and cache the result in the population field.
+We aggregate the pay For non-leaves, this will recursively iterate through children, and cache the result in the pay field.
 
 ```{r}
 tree$Do(function(x) {
@@ -395,11 +417,54 @@ print(tree, "pay", "cum_pay", pruneMethod = "dist", limit = 20)
 
 ```
 
-If we drop the `grade` it might be more informative as not all the departments units have each `grade`.
+If we drop the `grade` it might be more informative as not all the departments units have each `grade`. We did do this which made some of the code above work which hadn't previously.
 
-## Round 2, fight
+## Pruning the tree
 
 We could also opt to prune for those smaller `units` that make up the `department`s.
 
-The previous steps were done to define our threshold: big units should be displayed, while small ones should be grouped together. This lets us define a pruning function that will allow a maximum of 7 countries per continent, and that will prune all countries making up less than 90% of a continent’s population.
+The previous steps were done to define our threshold: big units should be displayed, while small ones should be grouped together. This lets us define a pruning function that will allow a maximum of 5 organisations per department, and that will prune all organisations making up less than 90% of a department's pay.
+
+Store the orginal number of units for later use:
+
+```{r}
+tree$Do(function(x) x$origCount <- x$count)
+
+```
+
+We are ready to prune. We know that the MOD has many `organisation`s and branches. Let's prune that down to the most important ones that make up at least 90% of the cumulative pay or the top 3 organisations.  
+
+```{r}
+myPruneFun <- function(x, cutoff = 0.9, maxCountries = 3) {
+  if (isNotLeaf(x)) return (TRUE)
+  if (x$position > maxCountries) return (FALSE)
+  return (x$cum_pay < (x$parent$pay * cutoff))
+}
+```
+
+We clone the tree, because we might want to play around with different parameters:
+
+```{r}
+treeClone <- Clone(tree, pruneFun = myPruneFun)
+print(treeClone$`Ministry of Defence`, "pay", pruneMethod = "simple", limit = 20)
+```
+
+We need to sum the organisations we pruned into an other category.
+
+```{r}
+treeClone$Do(function(x) {
+  missing <- x$pay - sum(sapply(x$children, function(x) x$pay))
+  other <- x$AddChild("Other")
+  other$iso3 <- paste0("OTH(", x$origCount, ")")
+  other$country <- "Other"
+  other$continent <- x$name
+  other$GNI <- 0
+  other$pay <- missing
+},
+filterFun = function(x) x$level == 2
+)
+
+
+print(treeClone$`Cabinet Office`, "pay", pruneMethod = "simple", limit = 20)
+```
 
