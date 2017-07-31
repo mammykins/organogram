@@ -102,7 +102,7 @@ Let's get an idea of what the data looks like.
 glimpse(small_data)
 ```
 
-There's `r unique(small_data$Name)` unique Names among the `r nrows(small_data)`.
+There's `r unique(small_data$Name)` unique Names among the `r nrow(small_data)`.
 
 ## Control for job sharing
 
@@ -466,5 +466,67 @@ filterFun = function(x) x$level == 2
 
 
 print(treeClone$`Cabinet Office`, "pay", pruneMethod = "simple", limit = 20)
+```
+
+## Plotting stuff
+
+In order to plot, need to convert back to data.frame
+
+```{r}
+df <- ToDataFrameTable(treeClone, "department", "organisation", "unit", "grade", "pay")
+
+treemap(df,
+        index=c("department", "organisation", "unit"),
+        vSize="pay",
+        vColor="grade",
+        type="value")
+```
+
+### Dendrogram
+
+```{r}
+plot(as.dendrogram(treeClone, heightAttribute = "pay"))
+# data(acme)
+# plot(as.dendrogram(acme))
+
+```
+
+## ggtree
+
+```{r}
+## try http:// if https:// URLs are not supported
+# source("https://bioconductor.org/biocLite.R")
+# biocLite("BiocUpgrade") # you may need this
+# biocLite("ggtree")
+# ggplot(tree, aes(x, y)) + geom_tree() + theme_tree()
+
+```
+fail
+
+## nicer tree
+
+```{r}
+# Install the package and set the RNG state
+devtools::install_github('johnbaums/trees')
+set.seed(1)
+library(trees)
+
+# Create a tree seed    
+s <- seed(70, 10, min.branch.length=0, max.branch.length=4,
+          min.trunk.height=5, max.trunk.height=8)
+
+head(s, 10)
+g <- germinate(s, col='peachpuff4')
+
+leafygreens <- colorRampPalette(paste0('darkolivegreen', c('', 1:4)))(100)
+foliate(g, 5000, 4, pch=24:25, col=NA, cex=1.5, bg=paste0(leafygreens, '30'))
+
+
+```
+
+## session info
+
+```{r}
+sessionInfo()
 ```
 
