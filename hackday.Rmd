@@ -9,9 +9,26 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+## Background  
+
+[Departmental organograms](https://www.instituteforgovernment.org.uk/blog/hacking-organograms-unlocking-government-data) are a great example of how transparency data can be used to assess Government effectiveness.  
+In May 2010, [David Cameron wrote](https://www.gov.uk/government/news/letter-to-government-departments-on-opening-up-data) to government departments asking them to publish an organogram showing a snapshot of their staff - the salaries, grades, roles, professions and units - every six months. 
+
+```{r echo=FALSE, out.width='100%'}
+knitr::include_graphics('./figures/no10.jpg')
+```
+
+## The data
+
+Some missing data, some departments are better than others.
+
+```{r echo=FALSE, out.width='100%'}
+knitr::include_graphics('./figures/mosaic.png')
+```
+
 ## Using data.trees to look at our hierarchial data
 
-Duncan wrote a script to read in the HMRC data as it is the most complete. This included some filtering and cleaning of the data.
+We wrote a script to read in the HMRC data as it is the most complete. This included some filtering and cleaning of the data.
 
 ```{r}
 library(tidyverse)
@@ -84,8 +101,6 @@ We load a suitable package.
 library(data.tree)
 ```
 
-
-
 ## Explore the data
 
 Read in as characters, let's use unique to help see the variety.
@@ -131,7 +146,17 @@ This isn't in the structure we want, we may need to reshape. Let's try and read 
 
 ## Attempt 2 - tidying data
 
-Let's take Duncan's initial script and get the data necessary to answer our question, as our interests have diverged. We are interested in getting the data into suitable format to be compatible with the `data.tree` format and all the opportunity this will provide (https://cran.r-project.org/web/packages/data.tree/vignettes/applications.html). We need hierarchial data.  
+### Treating as a tree not a dataframe
+
+People often try to resolve hierarchical problems in a tabular fashion, for instance with data frames. But often, hierarchies don’t marry with tables, and various workarounds are usually required. Let's prepare the data acknowledging the inherent hierarchy.  
+
+We load a suitable package.
+
+```{r}
+library(data.tree)
+```
+
+Let's take our initial script and get the data necessary to answer our question, as our interests have diverged. We are interested in getting the data into suitable format to be compatible with the `data.tree` format and all the opportunity this will provide (https://cran.r-project.org/web/packages/data.tree/vignettes/applications.html). We need hierarchial data.  
 
 ```{r}
 library(tidyverse)
@@ -146,6 +171,7 @@ library(stringr)
 data_file <- "./Departmental_organograms_gov.uk_data.gov_.uk_4_7_2017.xlsx"
 
 sheets <- excel_sheets(data_file)
+#  vectorise over string and pattern
 org_sheets <- sheets[str_detect(sheets, "^Collated\\.")]
 
 org_data <-
@@ -196,9 +222,36 @@ small_data <-
   mutate(quarter = openxlsx::convertToDate(quarter))
 ```
 
+Let's look at our data.
+
+```{r}
+glimpse(small_data)
+```
+
+Let's see how the missingness of the data. The different missing patterns are displayed giving us the proportions of missings by variables and the relative frequency of each pattern.  
+
+```{r}
+extracat::visna(small_data, sort = "b")
+```
+
+`pay` is missing very often, and `pay_ceiling` is missing more than `pay_floor`.
+
+### Pay ceiling through time
+
+However we can still interrogate the data.
+
+```{r}
+small_data %>% 
+  group_by(quarter) %>% 
+  summarise(pay_cap = mean(as.numeric(pay_ceiling), na.rm = TRUE)) %>%
+  plot(., type = "l")
+```
+
+Problematic data, need to clean and tidy but only here for one day!
+
 ## Tidy data
 
-We try again, this type with the relevant variables in place. However, we need to order our variables and convert to factors where appropriate. We should also make it tidy data by having one row per unique person, we can do this by combining post. Let's keep things simple by looking our most recent quarter, then we can use `purrr` later to do it iteratively over each quarter. Let's take the quarter with the most data, `max(table(small_data$quarter))` 
+We try again, this type with the relevant variables in place. However, we need to order our variables and convert to factors where appropriate. We should also make it tidy data by having one row per unique person, we can do this by combining post. Let's keep things simple by looking our most recent quarter, then we can use `purrr` later to do it iteratively over each quarter. Let's take the quarter with the most data, `max(table(small_data$quarter))` (We have revisited this and used all the quarters as you can see in the code below).
 
 ```{r message=FALSE}
 # Correct type of variables
@@ -288,6 +341,12 @@ easy_data <- corrected_grades
 
 ```
 
+This code correct for the different encodings across departments for the Senior Civil Service. I tried to vectorise with forcats but couldn't work at how to do it simply.  
+
+```{r echo=FALSE, out.width='100%'}
+knitr::include_graphics('./figures/scs.png')
+```
+
 Let's look at our data. We might want to look at a few Departments of interest as there seems to be variation in their names and difference in employes.
 
 ```{r}
@@ -318,6 +377,23 @@ treemap(easy_data,
        type="value")
 ```
 
+## Prepare tree structure
+
+> Abraham Lincoln once said, "Give me six hours to chop down a tree and I will spend the first four sharpening the axe." 
+Aunt Margaret used to say, "If you dream of a forest, you'd better learn how to plant a tree." 
+data.tree says, "No matter if you are a lumberjack or a tree hugger. I will be your sanding block, and I will be your seed."
+
+### the package
+
+This package offers an alternative. The data.tree package lets you create hierarchies, called data.tree structures. The building block of theses structures are Node objects. The package provides basic traversal, search, and sort operations, and an infrastructure for recursive tree programming. You can decorate Nodes with your own fields and methods, so as to extend the package to your needs.
+
+The package also provides convenience methods for neatly printing and plotting trees. It supports conversion from and to data.frames,  lists, and other tree structures such as dendrogram, phylo objects from the ape package, igraph, and other packages.
+
+Technically, data.tree structures are bi-directional, ordered trees. Bi-directional means that you can navigate from parent to chidren and vice versa. Ordered means that the sort order of the children of a parent node is well-defined.
+
+### Our first tree
+
+Let’s convert that into a `data.tree` structure! We start by defining a pathString. The pathString describes the hierarchy by defining a path from the root to each leaf. In this example, the hierarchy comes very naturally:
 
 Let's try making it into a tree.
 
@@ -332,18 +408,26 @@ easy_data$pathString <- paste("civil_service",
                                easy_data$department,
                               easy_data$organisation,
                                easy_data$unit,
-                              # easy_data$grade,
+                              easy_data$grade,
+                              easy_data$name,
                               sep = "/")
 tree <- as.Node(easy_data[,])
 print(tree, pruneMethod = "dist", limit = 20)
 ```
 
-We can also navigate the tree to find the pay of a specific `department`, `organisation`, `unit`
+We can also navigate the tree to find the pay of a specific `department`, `organisation`, `unit`. Makes working with the data is the relationships are intrinsic to the data. Presumably that speeds up filtering and searches?
 
 ```{r}
-tree$`Department for Education`$`Education Funding Agency`$`Education Funding Agency`$pay
+tree$`Department for Education`
 
 ```
+
+You can also extract info from the leaves.
+
+```{r}
+tree$`Department for Education`$`Education Funding Agency`$`Education Funding Agency`$SCS2$`simon parkes`$pay
+```
+
 
 How is this useful?
 
@@ -353,6 +437,11 @@ In computing, tree data structures, and game theory, the branching factor is the
 
 ```{r}
 tree$`Cabinet Office`$children
+
+```
+We can look at it and then quantify it also.
+
+```{r}
 tree$`Cabinet Office`$averageBranchingFactor
 
 ```
@@ -361,9 +450,17 @@ Thus we can quantify the complexity, debateably.
 
 ```{r}
 tree$`Ministry of Defence`$children
-tree$`Ministry of Defence`$averageBranchingFactor
 ```
 
+
+```{r}
+tree$`Ministry of Defence`$averageBranchingFactor
+
+```
+
+Much higher branching factor! Although we haven't controlled for time, this is across all quarters and we know the data had different missingness patterns for the different departments.
+
+### Neat sort functionality
 
 ```{r}
 dfe <- tree$`Department for Education`
@@ -371,7 +468,9 @@ Sort(dfe, "pay", decreasing = TRUE)
 print(dfe, "department", "unit", "grade", "pay", limit = 12)
 ```
 
-Or we can find out the department with the largest `pay` for an individual. Which is...
+### Big earner
+
+Or we can find out the name of the largest `pay` for an individual. Which is...
 
 ```{r}
 max_pay <- Aggregate(tree, "pay", max)
@@ -383,7 +482,7 @@ max_pay <- max(sapply(tree$leaves, function(x) x$pay))
 tree$Get("name", filterFun = function(x) x$isLeaf && x$pay == max_pay)
 ```
 
-## Aggregating, cumulative pay
+### Aggregating, cumulative pay
 
 We aggregate the pay For non-leaves, this will recursively iterate through children, and cache the result in the pay field.
 
@@ -417,7 +516,6 @@ print(tree, "pay", "cum_pay", pruneMethod = "dist", limit = 20)
 
 ```
 
-If we drop the `grade` it might be more informative as not all the departments units have each `grade`. We did do this which made some of the code above work which hadn't previously.
 
 ## Pruning the tree
 
@@ -470,7 +568,8 @@ print(treeClone$`Cabinet Office`, "pay", pruneMethod = "simple", limit = 20)
 
 ## Plotting stuff
 
-In order to plot, need to convert back to data.frame
+In order to plot, need to convert back to data.frame.
+
 
 ```{r}
 df <- ToDataFrameTable(treeClone, "department", "organisation", "unit", "grade", "pay")
@@ -482,9 +581,11 @@ treemap(df,
         type="value")
 ```
 
+The civil service, the darker the colour the higher the grade. Each little square represents a leaf or an individual named person in that department. With the area proportional to their pay.
+
 ### Dendrogram
 
-```{r}
+```{r eval = FALSE}
 plot(as.dendrogram(treeClone, heightAttribute = "pay"))
 # data(acme)
 # plot(as.dendrogram(acme))
